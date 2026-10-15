@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #F3F4F6;
+    color: #1C2421;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: 'Montserrat', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Card with top stripe */
+.card-top-stripe {
+  background-color: #FFFFFF;
+  border: 1px solid #B8BABB;
+  border-top: 4px solid #3A5D33;
+  border-radius: 8px;
+}
+
+.card-top-stripe-amber {
+  background-color: #FFFFFF;
+  border: 1px solid #B8BABB;
+  border-top: 4px solid #D97706;
+  border-radius: 8px;
+}
+
+/* Standard clean card */
+.planner-card {
+  background-color: #FFFFFF;
+  border: 1px solid #B8BABB;
+  border-radius: 8px;
+}
+
+/* Badges */
+.badge-green {
+  background-color: #E9EFE9;
+  color: #3A5D33;
+}
+
+.badge-amber {
+  background-color: #FEF3C7;
+  color: #B45309;
+}
+
+/* Print Stylesheet */
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.6cm;
+  }
+
+  body {
+    background-color: #FFFFFF !important;
+    color: #111827 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-page-break {
+    page-break-before: always;
+  }
+
+  .print-break-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .card-top-stripe, .planner-card {
+    border: 1px solid #9CA3AF !important;
+    box-shadow: none !important;
+  }
+
+  .seating-print-canvas {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: 1px solid #9CA3AF !important;
+    background: #FFFFFF !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
