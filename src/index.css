@@ -51,8 +51,8 @@
 /* Print Stylesheet */
 @media print {
   @page {
-    size: landscape;
-    margin: 0.6cm;
+    size: A4 landscape;
+    margin: 12mm;
   }
 
   body {
@@ -71,12 +71,17 @@
   }
 
   .print-page-break {
-    page-break-before: always;
+    break-before: page !important;
+    page-break-before: always !important;
   }
 
-  .print-break-avoid {
-    break-inside: avoid;
-    page-break-inside: avoid;
+  .print-break-avoid, tr, .stat-card, .cohort-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
   }
 
   .card-top-stripe, .planner-card {

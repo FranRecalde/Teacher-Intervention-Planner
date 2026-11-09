@@ -29,6 +29,7 @@ import {
   Settings,
   ShieldCheck,
   FileDown,
+  Loader2,
   ChevronDown,
   ChevronUp,
   BookOpen,
@@ -72,6 +73,18 @@ import {
   DetectedFieldMapping,
 } from './rulesAndData';
 import { SeatingPlan, SeatingPosition } from './SeatingPlan';
+import {
+  generateInterventionPlanPdf,
+  getEffectivePosition,
+} from './pdfExport';
+import {
+  LayoutType,
+  computeLayoutSlots,
+  getTraySlot,
+  SEND_CODE_MAP,
+  getSendInfo,
+  LAYOUT_OPTIONS,
+} from './seatingLayouts';
 import {
   SendRecord,
   SendReviewState,
@@ -213,6 +226,9 @@ export default function App() {
   const [seatingPositions, setSeatingPositions] = useState<Record<string, SeatingPosition>>({});
   const [selectedPupilIdForSeating, setSelectedPupilIdForSeating] = useState<string | null>(null);
   const [showGroupColorsOnSeating, setShowGroupColorsOnSeating] = useState<boolean>(true);
+  const [seatingLayout, setSeatingLayout] = useState<LayoutType>('rows-8x4');
+  const [customCols, setCustomCols] = useState<number>(7);
+  const [customRows, setCustomRows] = useState<number>(4);
 
   // Expandable Why Flagged state for pupil cards
   const [expandedFlagInfo, setExpandedFlagInfo] = useState<Record<string, boolean>>({});
@@ -222,6 +238,52 @@ export default function App() {
       ...prev,
       [pupilId]: !prev[pupilId],
     }));
+  };
+
+  // Export Plan PDF states & warning modal
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
+  const [unplacedWarningCount, setUnplacedWarningCount] = useState<number | null>(null);
+
+  const handleExportPlanClick = () => {
+    // Count unplaced pupils (x < TRAY_WIDTH - 15)
+    const unplaced = pupils.filter((p, idx) => {
+      const pos = seatingPositions[p.id] || getTraySlot(idx);
+      return pos.x < 224 - 15;
+    });
+
+    if (unplaced.length > 0) {
+      setUnplacedWarningCount(unplaced.length);
+    } else {
+      executeExportPdf();
+    }
+  };
+
+  const executeExportPdf = async () => {
+    setUnplacedWarningCount(null);
+    try {
+      setIsExportingPdf(true);
+      setPdfExportError(null);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await generateInterventionPlanPdf({
+        pupils,
+        pupilAnalyses,
+        priorities,
+        interventionGroups,
+        seatingPositions,
+        showGroupColors: showGroupColorsOnSeating,
+        metrics,
+        classCode: '11A/Sp1',
+        layoutType: seatingLayout,
+        customCols,
+        customRows,
+      });
+    } catch (err: any) {
+      console.error('Failed to generate PDF:', err);
+      setPdfExportError(err?.message || 'Failed to generate PDF document.');
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   // Export Plan as a clean, self-contained printable HTML document
@@ -2964,17 +3026,17 @@ export default function App() {
                                 }}
                                 className="p-2 bg-white rounded border border-[#B8BABB] shadow-xs cursor-move hover:border-[#3A5D33] transition-colors flex items-center justify-between"
                               >
-                                <div className="flex items-center space-x-1.5 truncate">
+                                <div className="flex items-center space-x-1.5 min-w-0 flex-1">
                                   {isFlagged && (
                                     <span
                                       className="w-2 h-2 rounded-full bg-[#D97706] shrink-0"
                                       title="Flagged pupil"
                                     />
                                   )}
-                                  <span className="text-xs font-semibold text-[#1C2421] truncate">
+                                  <span className="text-xs font-semibold text-[#1C2421] break-words">
                                     {pupil.name}
                                   </span>
-                                  <span className="text-[10px] text-gray-500 bg-gray-100 px-1 py-0.5 rounded">
+                                  <span className="text-[10px] text-gray-500 bg-gray-100 px-1 py-0.5 rounded shrink-0">
                                     G{pupil.currentGrade} &rarr; G{pupil.targetGrade}
                                   </span>
                                 </div>
@@ -3434,6 +3496,12 @@ export default function App() {
             onUpdateTeacherNotes={handleUpdateTeacherNotes}
             onLoadSampleData={handleLoadSampleData}
             onGoToUpload={() => setActiveTab('upload')}
+            layoutType={seatingLayout}
+            setLayoutType={setSeatingLayout}
+            customCols={customCols}
+            setCustomCols={setCustomCols}
+            customRows={customRows}
+            setCustomRows={setCustomRows}
           />
         )}
 
@@ -3484,22 +3552,44 @@ export default function App() {
 
                 <div className="flex items-center space-x-2">
                   <button
-                    onClick={handleExportPlanHtml}
-                    className="px-4 py-2 text-xs font-semibold rounded border border-[#3A5D33] text-[#3A5D33] hover:bg-[#3A5D33]/10 transition-colors flex items-center shadow-xs"
-                    title="Download intervention plan as clean printable page"
+                    onClick={handleExportPlanClick}
+                    disabled={isExportingPdf}
+                    className="px-4 py-2 text-xs font-semibold rounded bg-[#3A5D33] text-white hover:bg-[#4C7943] transition-colors flex items-center shadow-xs disabled:opacity-60 cursor-pointer"
+                    title="Download complete landscape A4 PDF with seating plan"
                   >
-                    <FileDown className="w-4 h-4 mr-1.5" />
-                    Export Plan
+                    {isExportingPdf ? (
+                      <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <FileDown className="w-4 h-4 mr-1.5" />
+                    )}
+                    {isExportingPdf ? 'Generating PDF...' : 'Export Plan (PDF)'}
                   </button>
                   <button
                     onClick={() => window.print()}
-                    className="px-5 py-2 text-xs font-semibold rounded bg-[#3A5D33] text-white hover:bg-[#4C7943] transition-colors shadow-sm flex items-center"
+                    className="px-4 py-2 text-xs font-semibold rounded border border-[#3A5D33] text-[#3A5D33] hover:bg-[#3A5D33]/10 transition-colors shadow-xs flex items-center cursor-pointer"
+                    title="Print now using clean landscape A4 stylesheet"
                   >
                     <Printer className="w-4 h-4 mr-2" />
                     Print Now (Clean Stylesheet)
                   </button>
                 </div>
               </div>
+
+              {/* Error banner if PDF export fails */}
+              {pdfExportError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700 flex items-center justify-between no-print">
+                  <div className="flex items-center space-x-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>PDF Generation Failed: {pdfExportError}</span>
+                  </div>
+                  <button
+                    onClick={() => setPdfExportError(null)}
+                    className="text-xs font-semibold text-red-600 hover:underline cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
 
             {/* Document To Print */}
             <div className="bg-white p-8 rounded-lg border border-[#B8BABB] shadow-sm space-y-6 print:border-none print:shadow-none print:p-0">
@@ -3615,73 +3705,376 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pupils
-                      .filter((p) => pupilAnalyses.get(p.id)?.isFlagged || p.sendArea)
-                      .map((p) => {
-                        const analysis = pupilAnalyses.get(p.id);
-                        return (
-                          <tr key={p.id} className="print-break-avoid">
-                            <td className="p-2 border border-gray-300 font-semibold align-top">
-                              {p.name}
-                            </td>
-                            <td className="p-2 border border-gray-300 align-top">
-                              G{p.currentGrade} / G{p.targetGrade}
-                            </td>
-                            <td className="p-2 border border-gray-300 text-amber-900 align-top">
-                              {analysis?.flagReasons.join('; ') || 'Target maintenance'}
-                            </td>
-                            <td className="p-2 border border-gray-300 text-gray-700 align-top">
-                              {p.sendArea ? (
-                                <span>
-                                  <strong>{p.sendArea}:</strong> {p.sendStrategy}
-                                </span>
-                              ) : (
-                                '-'
-                              )}
-                            </td>
-                            <td className="p-2 border border-gray-300 text-gray-800 align-top text-xs">
-                              {p.chosenStrategies && p.chosenStrategies.length > 0 && (
-                                <ul className="mb-1 space-y-1">
-                                  {p.chosenStrategies.map((sId) => {
-                                    const s = findStrategyById(sId);
-                                    if (!s) return null;
-                                    return (
-                                      <li key={sId} className="text-[11px] leading-tight">
-                                        <strong className="text-gray-900">{s.strategy}</strong>{' '}
-                                        <span className="text-[#3A5D33] font-bold text-[10px]">
-                                          [{s.technique}]
-                                        </span>
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              )}
-                              {p.teacherNotes ? (
-                                <p className="italic text-gray-600 text-[11px]">
-                                  {p.teacherNotes}
-                                </p>
-                              ) : !p.chosenStrategies || p.chosenStrategies.length === 0 ? (
-                                <span className="italic text-gray-400">Monitor next assessment cycle.</span>
-                              ) : null}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                    {pupils.map((p) => {
+                      const analysis = pupilAnalyses.get(p.id);
+                      const isFlagged = analysis?.isFlagged;
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`print-break-avoid ${
+                            isFlagged ? 'bg-amber-50/40' : ''
+                          }`}
+                        >
+                          <td className="p-2 border border-gray-300 font-semibold align-top">
+                            {p.name}
+                            {isFlagged && (
+                              <span className="ml-1.5 text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full inline-block">
+                                FLAGGED
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2 border border-gray-300 align-top text-center whitespace-nowrap">
+                            G{p.currentGrade} / G{p.targetGrade}
+                          </td>
+                          <td className="p-2 border border-gray-300 text-amber-900 align-top">
+                            {analysis?.flagReasons && analysis.flagReasons.length > 0
+                              ? analysis.flagReasons.join('; ')
+                              : 'On track (at or above target)'}
+                          </td>
+                          <td className="p-2 border border-gray-300 text-gray-700 align-top">
+                            {p.sendArea ? (
+                              <span>
+                                <strong>{p.sendArea}:</strong> {p.sendStrategy || 'Universal adjustments'}
+                              </span>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="p-2 border border-gray-300 text-gray-800 align-top text-xs">
+                            {p.chosenStrategies && p.chosenStrategies.length > 0 && (
+                              <ul className="mb-1 space-y-1">
+                                {p.chosenStrategies.map((sId) => {
+                                  const s = findStrategyById(sId);
+                                  if (!s) return null;
+                                  return (
+                                    <li key={sId} className="text-[11px] leading-tight">
+                                      <strong className="text-gray-900">{s.strategy}</strong>{' '}
+                                      <span className="text-[#3A5D33] font-bold text-[10px]">
+                                        [{s.technique}]
+                                      </span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                            {p.teacherNotes ? (
+                              <p className="italic text-gray-600 text-[11px]">
+                                {p.teacherNotes}
+                              </p>
+                            ) : !p.chosenStrategies || p.chosenStrategies.length === 0 ? (
+                              <span className="italic text-gray-400">Monitor next assessment cycle.</span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               {/* Sign-off footer */}
-              <div className="pt-6 border-t border-gray-200 flex justify-between text-xs text-gray-500">
+              <div className="pt-6 border-t border-gray-200 flex justify-between text-xs text-gray-500 print-break-avoid">
                 <p>Teacher Signature: __________________________</p>
                 <p>Date: __________________________</p>
                 <p>HOD / SLT Review Date: __________________________</p>
+              </div>
+
+              {/* 4. Classroom Seating Plan (Starts on its own separate page in print) */}
+              <div className="print-page-break pt-6">
+                <div className="border-b-2 border-[#3A5D33] pb-2 mb-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-xs font-bold text-[#3A5D33] uppercase tracking-wider">
+                        Classroom Layout & Intervention Placements
+                      </span>
+                      <h3 className="text-lg font-bold font-heading text-[#1C2421]">
+                        4. Classroom Seating Plan
+                      </h3>
+                    </div>
+                    <div className="text-right text-xs text-gray-500">
+                      <p className="font-semibold text-gray-700">Class: 11A/Sp1</p>
+                      <p>
+                        Placed:{' '}
+                        <strong>
+                          {
+                            pupils.filter(
+                              (p, idx) =>
+                                (seatingPositions[p.id]?.x ?? getTraySlot(idx).x) >=
+                                224 - 15
+                            ).length
+                          }
+                        </strong>{' '}
+                        &bull; Unplaced:{' '}
+                        <strong>
+                          {
+                            pupils.filter(
+                              (p, idx) =>
+                                (seatingPositions[p.id]?.x ?? getTraySlot(idx).x) <
+                                224 - 15
+                            ).length
+                          }
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Seating Plan Printable Box */}
+                {(() => {
+                  const previewSlots = computeLayoutSlots(seatingLayout, customCols, customRows);
+                  const slotToPupil = new Map<string, Pupil>();
+                  const placedPupilIds = new Set<string>();
+
+                  previewSlots.forEach((slot) => {
+                    const matched = pupils.find((p, idx) => {
+                      const pos = seatingPositions[p.id] || getTraySlot(idx);
+                      return Math.abs(pos.x - slot.x) < 18 && Math.abs(pos.y - slot.y) < 18;
+                    });
+                    if (matched) {
+                      slotToPupil.set(slot.id, matched);
+                      placedPupilIds.add(matched.id);
+                    }
+                  });
+
+                  const unplaced = pupils.filter((p) => !placedPupilIds.has(p.id));
+
+                  return (
+                    <div className="space-y-4 print-break-avoid">
+                      <div className="relative bg-white rounded-lg border-2 border-gray-300 p-2 overflow-hidden select-none min-h-[480px]">
+                        {/* Classroom grid / desks */}
+                        <div className="relative w-full h-[410px]">
+                          {/* Door */}
+                          <div
+                            style={{ left: '2%', top: '10px' }}
+                            className="absolute bg-amber-50 text-amber-900 rounded border border-dashed border-[#D97706] px-2.5 py-1 text-xs font-bold flex items-center space-x-1 shadow-xs"
+                          >
+                            <span>Door</span>
+                          </div>
+
+                          {/* Interactive Whiteboard */}
+                          <div
+                            style={{ left: '34%', top: '10px' }}
+                            className="absolute bg-slate-800 text-white rounded border border-slate-900 px-3 py-1.5 text-xs font-bold flex items-center space-x-1.5 shadow-xs"
+                          >
+                            <span className="text-emerald-400 mr-1">&#9646;</span>
+                            <span>Interactive whiteboard</span>
+                          </div>
+
+                          {/* Teacher Desk */}
+                          <div
+                            style={{ left: '78%', top: '10px' }}
+                            className="absolute bg-slate-100 text-slate-800 rounded border border-dashed border-slate-400 px-3 py-1.5 text-xs font-semibold flex items-center space-x-1.5 shadow-xs"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-slate-400 mr-0.5" />
+                            <span>Teacher desk</span>
+                          </div>
+
+                          {/* Render all slots */}
+                          {previewSlots.map((slot) => {
+                            const seatedPupil = slotToPupil.get(slot.id);
+                            // Convert canvas coords (x in 236..1068, y in 82..640) to relative percentages
+                            const leftPct = ((slot.x - 224) / 856) * 100;
+                            const topPct = (slot.y / 650) * 100;
+                            const widthPct = (slot.width / 856) * 100;
+
+                            if (!seatedPupil) {
+                              return (
+                                <div
+                                  key={slot.id}
+                                  style={{
+                                    left: `${leftPct}%`,
+                                    top: `${topPct}%`,
+                                    width: `${widthPct}%`,
+                                    height: '42px',
+                                  }}
+                                  className="absolute border border-dashed border-gray-300 rounded bg-gray-50/50 flex flex-col items-center justify-center p-1 text-[9px] text-gray-400 font-semibold"
+                                >
+                                  <span>{slot.label}</span>
+                                </div>
+                              );
+                            }
+
+                            const analysis = pupilAnalyses.get(seatedPupil.id);
+                            const isFlagged = analysis?.isFlagged;
+                            const grpIdx = interventionGroups.findIndex((g) =>
+                              g.pupilIds.includes(seatedPupil.id)
+                            );
+                            const grpPalette =
+                              grpIdx !== -1
+                                ? INTERVENTION_PALETTE[grpIdx % INTERVENTION_PALETTE.length]
+                                : null;
+                            const sendInfo = getSendInfo(seatedPupil.sendArea);
+
+                            return (
+                              <div
+                                key={slot.id}
+                                style={{
+                                  left: `${leftPct}%`,
+                                  top: `${topPct}%`,
+                                  width: `${widthPct}%`,
+                                  minHeight: '44px',
+                                  borderLeftColor:
+                                    showGroupColorsOnSeating && grpPalette
+                                      ? grpPalette.border
+                                      : undefined,
+                                  borderLeftWidth:
+                                    showGroupColorsOnSeating && grpPalette ? 4 : undefined,
+                                }}
+                                className="absolute bg-white rounded border border-[#B8BABB] shadow-2xs p-1.5 flex flex-col justify-between text-left"
+                              >
+                                <div className="flex items-start space-x-1 leading-tight">
+                                  <span
+                                    className={`w-2 h-2 rounded-full shrink-0 mt-0.5 ${
+                                      isFlagged ? 'bg-[#D97706]' : 'bg-[#3A5D33]'
+                                    }`}
+                                  />
+                                  <span className="text-[10px] font-bold text-[#1C2421] leading-tight break-words">
+                                    {seatedPupil.name}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[8.5px] text-gray-600 mt-1 pt-0.5 border-t border-gray-100">
+                                  <span className="font-semibold">
+                                    G{seatedPupil.currentGrade} / T{seatedPupil.targetGrade}
+                                  </span>
+                                  {sendInfo && (
+                                    <span
+                                      className="bg-[#E9EFE9] text-[#3A5D33] px-1 rounded font-bold"
+                                      title={sendInfo.label}
+                                    >
+                                      {sendInfo.code}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Unplaced Pupils Section (Hidden if all placed) */}
+                      {unplaced.length > 0 && (
+                        <div className="p-3 bg-gray-50 border border-gray-200 rounded text-xs print-break-avoid">
+                          <h4 className="font-bold text-[#1C2421] mb-2 flex items-center">
+                            <span>Unplaced pupils ({unplaced.length})</span>
+                          </h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {unplaced.map((p) => (
+                              <div
+                                key={p.id}
+                                className="bg-white p-2 rounded border border-gray-200 text-[11px] flex items-center justify-between gap-1"
+                              >
+                                <span className="font-semibold text-gray-800 break-words flex-1">
+                                  {p.name}
+                                </span>
+                                <span className="text-gray-500 shrink-0 text-[10px] font-mono">
+                                  G{p.currentGrade} / T{p.targetGrade}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Comprehensive Legend Matching Tab 5 & PDF */}
+                      <div className="p-3 bg-white border border-gray-200 rounded text-xs space-y-2 text-gray-700 print-break-avoid">
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[11px]">
+                          <span className="font-bold text-[#1C2421]">Key &amp; Legend:</span>
+                          <span className="flex items-center space-x-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#3A5D33]" />
+                            <span>Green = On Track</span>
+                          </span>
+                          <span className="flex items-center space-x-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#D97706]" />
+                            <span>Orange = Flagged for Review</span>
+                          </span>
+                          <span className="text-gray-500 font-mono text-[10px] bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
+                            G4 / T5 = current grade 4, target grade 5
+                          </span>
+                        </div>
+
+                        {/* SEND Codes Key */}
+                        <div className="text-[11px] pt-1 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-gray-700">SEND Codes:</span>
+                          {Object.entries(SEND_CODE_MAP)
+                            .filter(([k, v], idx, arr) => arr.findIndex((x) => x[1].code === v.code) === idx)
+                            .map(([_, v]) => (
+                              <span key={v.code} className="inline-flex items-center space-x-1 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200 text-[10px]">
+                                <strong className="text-[#3A5D33]">{v.code}</strong>
+                                <span>= {v.label}</span>
+                              </span>
+                            ))}
+                        </div>
+
+                        {/* Intervention Group Colours (Shown only when Group Colours is ON) */}
+                        {showGroupColorsOnSeating && interventionGroups.length > 0 && (
+                          <div className="pt-1.5 border-t border-gray-100 space-y-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-gray-700">Intervention Groups (Left Bar):</span>
+                              <span className="text-[10px] text-gray-500 italic">
+                                Colours show which interventions each pupil is in, so seating can pair pupils for support.
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-[10px]">
+                              {interventionGroups.map((g, i) => {
+                                const pal = INTERVENTION_PALETTE[i % INTERVENTION_PALETTE.length];
+                                return (
+                                  <span
+                                    key={g.id}
+                                    className="flex items-center space-x-1 px-2 py-0.5 rounded border"
+                                    style={{ borderColor: pal.border, backgroundColor: pal.bg, color: pal.text }}
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-xs"
+                                      style={{ backgroundColor: pal.border }}
+                                    />
+                                    <strong className="text-[10.5px]">{g.name}</strong>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
           )
         )}
       </main>
+
+      {/* Unplaced Pupils Warning Modal */}
+      {unplacedWarningCount !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 no-print">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 border border-[#B8BABB]">
+            <div className="flex items-center space-x-2 text-amber-600 mb-2">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <h3 className="font-heading font-bold text-base text-[#1C2421]">
+                Unplaced Pupils Warning
+              </h3>
+            </div>
+            <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+              <strong>{unplacedWarningCount} {unplacedWarningCount === 1 ? 'pupil is' : 'pupils are'} not placed yet.</strong> They will be listed as unplaced in the seating plan section of the PDF.
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                onClick={() => setUnplacedWarningCount(null)}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeExportPdf}
+                className="px-4 py-1.5 text-xs font-semibold rounded bg-[#3A5D33] text-white hover:bg-[#4C7943] transition-colors shadow-xs cursor-pointer"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Whole Class Priority Modal */}
       {showAddPriorityModal && (
